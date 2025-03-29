@@ -1,0 +1,10 @@
+root
+   a
+      b
+         c
+         hello.txt
+      d
+         text
+      password
+   book.txt
+   book2.txt

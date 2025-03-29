@@ -1,0 +1,4 @@
+drwx	64	. -> root
+d---	80	a
+fr-x	0	book.txt
+frw-	0	book2.txt
