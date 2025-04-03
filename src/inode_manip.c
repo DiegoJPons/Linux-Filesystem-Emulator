@@ -134,54 +134,80 @@ void modify_byte(filesystem_t *fs, inode_t *inode, size_t offset, byte *buffer) 
 }
 
 void free_direct_blocks(filesystem_t *fs, inode_t *inode, size_t n){
-    if(n == 0) {
-        return;
+    
+    if(inode->internal.file_size - n == 0) {
+        for(size_t i = 0; i < 4; i++) {
+            dblock_index_t block_index = inode->internal.direct_data[i];
+            if (block_index != 0) {
+            byte *block = fs->dblocks + block_index * 64;
+            release_dblock(fs, block);
+            }
+        }
     }
 
-    for(size_t i = 4; i > 4 - n; i--) {
-        if(inode->internal.direct_data[i - 1] != 0) {
-            byte *block = fs->dblocks + (inode->internal.direct_data[i - 1] * DATA_BLOCK_SIZE);
+    while(n > 0) {
+        size_t last_byte_index = (inode->internal.file_size - 1) / 64;
+        dblock_index_t block_index = inode->internal.direct_data[last_byte_index];
+        byte *block = fs->dblocks + block_index * 64;
+        size_t offset = (inode->internal.file_size - last_byte_index * 64) - 1;
+
+        for(int i = offset; i >= 0 &&  n > 0; i--, n--) {
+            inode->internal.file_size -= 1;
+        }
+        if(n > 0) {
             release_dblock(fs, block);
-            inode->internal.direct_data[i - 1] = 0;
         }
     }
 }
 
 void free_indirect_blocks(filesystem_t *fs, inode_t *inode, size_t n){
-    if(n == 0) {
-        return;
-    }
+    
+    size_t num_iblocks = calculate_index_dblock_amount(inode->internal.file_size);
+    size_t num_dblocks = calculate_necessary_dblock_amount(inode->internal.file_size) - 4 - num_iblocks;
+    size_t num_dblocks_in_last_iblock = (num_dblocks % 15 == 0 && num_iblocks > 0) ? 15 : num_dblocks % 15;
 
     while(n > 0) {
-        size_t used_dblocks = (inode->internal.file_size / 64) - 4;
-        size_t iblock_num = used_dblocks / 15;
-        size_t blocks_in_current_iblock = used_dblocks % 15;
-
         dblock_index_t current = inode->internal.indirect_dblock;
-        for(size_t i = 0; i < iblock_num; i++){
-            byte *block = fs->dblocks + (current * 64);
-            dblock_index_t *dpointers = cast_dblock_ptr(block);
-            current = dpointers[15];
+        if(num_iblocks != 0) {
+            for(size_t i = 0; i < num_iblocks - 1; i++){
+                byte *block = fs->dblocks + (current * 64);
+                dblock_index_t *dpointers = cast_dblock_ptr(block);
+                current = dpointers[15];
+            }
         }
 
-        for(size_t j = blocks_in_current_iblock; j > 0; j--){
-            if(n == 0){
-                return;
-            }
-            byte *block = fs->dblocks + (current * 64);
-            dblock_index_t *index = cast_dblock_ptr(block);
+        byte *block = fs->dblocks + (current * 64);
+        dblock_index_t *index = cast_dblock_ptr(block);
 
-            if(index[j - 1] != 0) {
-                release_dblock(fs, fs->dblocks + index[j - 1] * 64);
-                n -= 1;
+        for(int i = num_dblocks_in_last_iblock - 1; i >= 0 && n > 0; i--) {
+            byte *data_block = fs->dblocks + (index[i] * 64);
+            size_t offset = (i == (int)num_dblocks_in_last_iblock) ? (inode->internal.file_size - (((num_iblocks - 1) * 960) + (256) + ((num_dblocks_in_last_iblock - 1) * 64))) - 1 : 63;
+            size_t lower_bound = 0;
+            if(n < 64) {
+                lower_bound = 64 - n;
             }
-
-            
+            for(int j = offset + 1; j > (int)lower_bound && n > 0; j--, n--) {
+                inode->internal.file_size -= 1;
+            }
+            if((int)n > 0 || lower_bound == 0) {
+                release_dblock(fs, data_block);
+                num_dblocks -= 1;
+            }
         }
+            if(n > 0 || inode->internal.file_size == 256) {
+                release_dblock(fs, block);
+            }
+        num_dblocks_in_last_iblock = 15;
+        num_iblocks  = (num_iblocks > 1) ? num_iblocks - 1: 0;
+        }
+
+    if(inode->internal.file_size == 256) {
+        dblock_index_t current = inode->internal.indirect_dblock;
+        byte *block = fs->dblocks + current * 64;
+        release_dblock(fs, block);
     }
-    
 }
-
+    
 // ----------------------- CORE FUNCTION ----------------------- //
 
 fs_retcode_t inode_write_data(filesystem_t *fs, inode_t *inode, void *data, size_t n)
@@ -259,19 +285,16 @@ fs_retcode_t inode_shrink_data(filesystem_t *fs, inode_t *inode, size_t new_size
     if(fs == NULL || inode == NULL || new_size > inode->internal.file_size) {
         return INVALID_INPUT;
     }
+    size_t bytes_to_remove = inode->internal.file_size - new_size;
+    if(inode->internal.file_size > 256) {
+        size_t bytes_to_remove_indirect = (inode->internal.file_size - bytes_to_remove > 256) ? bytes_to_remove : inode->internal.file_size  - (256 - new_size);
+        free_indirect_blocks(fs, inode, bytes_to_remove_indirect);
+        bytes_to_remove -= bytes_to_remove_indirect;
+    }
 
-    size_t blocks_to_remove = calculate_necessary_dblock_amount(inode->internal.file_size) - calculate_necessary_dblock_amount(new_size);
-
-    size_t current_num_dblocks = (calculate_necessary_dblock_amount(inode->internal.file_size) >= 4) ? 4 : calculate_necessary_dblock_amount(inode->internal.file_size);
-    size_t new_num_dblocks = (calculate_necessary_dblock_amount(new_size) >= 4) ? 4 : calculate_necessary_dblock_amount(new_size);
-
-    if(new_num_dblocks < current_num_dblocks){
-        size_t dblocks_to_remove = current_num_dblocks - new_num_dblocks;
-        free_direct_blocks(fs, inode, dblocks_to_remove);
-        blocks_to_remove -= dblocks_to_remove;
+    if(bytes_to_remove > 0){
+        free_direct_blocks(fs, inode, bytes_to_remove);
     } 
-
-    // free_indirect_blocks(fs, inode, blocks_to_remove);
 
     inode->internal.file_size = new_size;
     return SUCCESS;
@@ -287,16 +310,43 @@ fs_retcode_t inode_shrink_data(filesystem_t *fs, inode_t *inode, size_t new_size
     //update filesize and return
 }
 
-// make new_size to 0
 fs_retcode_t inode_release_data(filesystem_t *fs, inode_t *inode)
 {
    if(fs == NULL || inode == NULL) {
         return INVALID_INPUT;
     }
 
-    free_direct_blocks(fs, inode, 4);
-    // free_indirect_blocks(fs, inode, calculate_necessary_dblock_amount(inode->internal.file_size) - 4);
+    for(size_t i = 0; i < 4; i++) {
+        dblock_index_t block_index = inode->internal.direct_data[i];
+        if (block_index != 0) {
+        byte *block = fs->dblocks + block_index * 64;
+        release_dblock(fs, block);
+        }
+    }
+
+    size_t num_iblocks = calculate_index_dblock_amount(inode->internal.file_size);
+    size_t num_dblocks = calculate_necessary_dblock_amount(inode->internal.file_size) - 4 - num_iblocks;
+    size_t num_dblocks_in_last_iblock = (num_dblocks % 15 == 0 && num_iblocks > 0) ? 15 : num_dblocks % 15;
+
+    while(num_iblocks > 0) {
+        dblock_index_t current = inode->internal.indirect_dblock;
+        for(size_t i = 0; i < num_iblocks - 1; i++){
+            byte *block = fs->dblocks + (current * 64);
+            dblock_index_t *dpointers = cast_dblock_ptr(block);
+            current = dpointers[15];
+    }
+        byte *block = fs->dblocks + (current * 64);
+        dblock_index_t *index = cast_dblock_ptr(block);
+        for(size_t i = 0; i < num_dblocks_in_last_iblock; i++) {
+            byte *data_block = fs->dblocks + (index[i] * 64);
+            release_dblock(fs, data_block);
+        }
+        release_dblock(fs, block);
+
+        num_iblocks -= 1;
+        num_dblocks -= num_dblocks_in_last_iblock;
+        num_dblocks_in_last_iblock = (num_dblocks % 15 == 0 && num_iblocks > 0) ? 15 : num_dblocks % 15;
+        }
     inode->internal.file_size = 0;
     return SUCCESS;
-    //shrink to size 0
 }
