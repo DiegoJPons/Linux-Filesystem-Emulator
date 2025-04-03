@@ -238,8 +238,7 @@ fs_retcode_t inode_write_data(filesystem_t *fs, inode_t *inode, void *data, size
 
 fs_retcode_t inode_read_data(filesystem_t *fs, inode_t *inode, size_t offset, void *buffer, size_t n, size_t *bytes_read)
 {
-
-    printf("\nOFFSET: %zu, BYTES_TO_READ: %zu\n", offset, n);
+    
     if(fs == NULL || inode == NULL || bytes_read == NULL) {
         return INVALID_INPUT;
     }
