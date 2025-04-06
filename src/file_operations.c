@@ -84,8 +84,27 @@ int check_dirr_component(filesystem_t *fs, const char *dirname, inode_t **opened
     size_t entries = (*opened_inode)->internal.file_size / 16;
     
     for(size_t i = 0; i <= entries; i++) {
-        byte *bytes = fs->dblocks + (index * 64) + (i * 16);
+        byte *bytes;
         
+        if(i > 16) {
+            size_t used_dblocks = ((*opened_inode)->internal.file_size / 64) - 4;
+            size_t iblock_num = used_dblocks / 15;
+            size_t blocks_in_current_iblock = used_dblocks % 15;
+   
+            dblock_index_t current = (*opened_inode)->internal.indirect_dblock;
+            for (size_t i = 0; i < iblock_num; i++) {
+                dblock_index_t *dpointers = cast_dblock_ptr(fs->dblocks + current * 64);
+                current = dpointers[15];  
+            }
+
+            dblock_index_t *index = cast_dblock_ptr(fs->dblocks + current * 64);
+            dblock_index_t data_block = index[blocks_in_current_iblock];
+            bytes = fs->dblocks + (data_block * 64);
+        }
+        else {
+            bytes = fs->dblocks + (index * 64) + (i * 16);
+        }
+
         dblock_index_t entry_index = (dblock_index_t)((bytes[1] << 8) | bytes[0]);
         inode_t *entry_inode = &fs->inodes[entry_index];
         char entry_name[MAX_FILE_NAME_LEN];
@@ -113,8 +132,27 @@ int check_basename(filesystem_t *fs, const char *basename, inode_t **opened_inod
     size_t entries = (*opened_inode)->internal.file_size / 16;
 
     for(size_t i = 0; i <= entries; i++) {
-        byte *bytes = fs->dblocks + (index * 64) + (i * 16);
+        byte *bytes;
         
+        if(i > 16) {
+            size_t used_dblocks = ((*opened_inode)->internal.file_size / 64) - 4;
+            size_t iblock_num = used_dblocks / 15;
+            size_t blocks_in_current_iblock = used_dblocks % 15;
+   
+            dblock_index_t current = (*opened_inode)->internal.indirect_dblock;
+            for (size_t i = 0; i < iblock_num; i++) {
+                dblock_index_t *dpointers = cast_dblock_ptr(fs->dblocks + current * 64);
+                current = dpointers[15];  
+            }
+
+            dblock_index_t *index = cast_dblock_ptr(fs->dblocks + current * 64);
+            dblock_index_t data_block = index[blocks_in_current_iblock];
+            bytes = fs->dblocks + (data_block * 64);
+        }
+        else {
+            bytes = fs->dblocks + (index * 64) + (i * 16);
+        }
+
         dblock_index_t entry_index = (dblock_index_t)((bytes[1] << 8) | bytes[0]);
         inode_t *entry_inode = &fs->inodes[entry_index];
         char entry_name[MAX_FILE_NAME_LEN];
