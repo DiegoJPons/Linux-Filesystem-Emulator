@@ -5,6 +5,6 @@
 
 int main()
 {
-    printf("Hello world");
+    // filesystem_t file = fs_open(&context, PATH("a/b/c/d/e"));
     return 0;
 }

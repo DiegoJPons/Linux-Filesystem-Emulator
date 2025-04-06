@@ -40,7 +40,7 @@ void compare_fs_files(char *output_buf, size_t output_size, char *expected_buf, 
     // now compare inodes
     for (size_t inode_idx = 0; inode_idx < expected_inode_count; ++inode_idx)
     {
-        for (size_t byte_idx = 0; byte_idx < sizeof(inode_index_t); ++byte_idx)
+        for (size_t byte_idx = 0; byte_idx < sizeof(inode_t); ++byte_idx)
         {
             ASSERT_EQ(output_buf[index], expected_buf[index]) 
                 << "Incorrect value for byte " << byte_idx << " at inode index " << inode_idx;

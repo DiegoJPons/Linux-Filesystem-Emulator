@@ -14,6 +14,7 @@
 // ----------------------- UTILITY FUNCTION ----------------------- //
 
 size_t fill_direct_nodes(filesystem_t *fs, inode_t *inode, void *data, size_t n) {
+
     size_t written = 0;
     size_t used_dblocks = inode->internal.file_size / 64;
     for(size_t i = used_dblocks; i < 4 && written < n; i++) {
@@ -47,6 +48,7 @@ size_t fill_indirect_nodes(filesystem_t *fs, inode_t *inode, void *data, size_t 
         size_t iblock_num = used_dblocks / 15;
         size_t blocks_in_current_iblock = used_dblocks % 15;
 
+
         dblock_index_t current = inode->internal.indirect_dblock;
         for(size_t i = 0; i < iblock_num; i++){
             byte *block = fs->dblocks + (current * 64);
@@ -72,10 +74,11 @@ size_t fill_indirect_nodes(filesystem_t *fs, inode_t *inode, void *data, size_t 
         size_t offset = inode->internal.file_size % 64;
         size_t write = (n - written < (64 - offset)) ? (n - written) : (64 - offset);
         
-        memcpy(data_block + offset, ((byte*)data) + written + start, write);
+        memcpy(data_block + offset, ((byte*)data) + written, write);
         written += write;
         inode->internal.file_size += write;
    }
+
    return written;
 }
 
@@ -233,6 +236,7 @@ fs_retcode_t inode_write_data(filesystem_t *fs, inode_t *inode, void *data, size
     else {
         fill_indirect_nodes(fs, inode, data, n, inode->internal.file_size);
     }
+
     return SUCCESS;
 }
 
