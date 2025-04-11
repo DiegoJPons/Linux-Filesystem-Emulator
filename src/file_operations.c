@@ -49,7 +49,7 @@ int check_dirr_component(filesystem_t *fs, const char *dirname, inode_t **opened
     
     info(1, "Checking dirr component: %s\n\n", dirname);
 
-    for(size_t i = 0; i < entries + 3; i++) {
+    for(size_t i = 0; i < entries; i++) {
         byte *bytes = fs->dblocks + (index * 64) + (i * 16);
 
         dblock_index_t entry_index = (dblock_index_t)((bytes[1] << 8) | bytes[0]);
@@ -57,7 +57,7 @@ int check_dirr_component(filesystem_t *fs, const char *dirname, inode_t **opened
         char entry_name[MAX_FILE_NAME_LEN];
         strncpy(entry_name, (char*)(bytes + 2), MAX_FILE_NAME_LEN);
 
-        info(1, "Directory entry : ");
+        info(1, "Directory entry (hex): ");
         for (int j = 0; j < 16; j++) {
             info(1, "%02X ", bytes[j]);
         }
@@ -189,7 +189,7 @@ void update_parent_directory(filesystem_t *fs, inode_t **parent_inode, char *fil
         memcpy(bytes, entry, 16);
     }
 
-    (*parent_inode)->internal.file_size += 16;
+    // (*parent_inode)->internal.file_size += 16;
 }
 int new_file(terminal_context_t *context, char *path, permission_t perms)
 {
