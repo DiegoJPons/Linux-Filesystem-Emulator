@@ -43,13 +43,13 @@ char* get_dirname(char *path) {
 int check_dirr_component(filesystem_t *fs, const char *dirname, inode_t **opened_inode) {
 
     dblock_index_t index = (*opened_inode)->internal.direct_data[0];
-    size_t entries = ((*opened_inode)->internal.file_size + 15) / 16;
+    size_t entries = ((*opened_inode)->internal.file_size + 15)  / 16;
 
     info(1, "File size: %zu, entries: %zu\n\n", (*opened_inode)->internal.file_size, entries);
     
     info(1, "Checking dirr component: %s\n\n", dirname);
 
-    for(size_t i = 0; i < entries; i++) {
+    for(size_t i = 0; i < entries + 3; i++) {
         byte *bytes = fs->dblocks + (index * 64) + (i * 16);
 
         dblock_index_t entry_index = (dblock_index_t)((bytes[1] << 8) | bytes[0]);
@@ -57,7 +57,7 @@ int check_dirr_component(filesystem_t *fs, const char *dirname, inode_t **opened
         char entry_name[MAX_FILE_NAME_LEN];
         strncpy(entry_name, (char*)(bytes + 2), MAX_FILE_NAME_LEN);
 
-        info(1, "Directory entry (hex): ");
+        info(1, "Directory entry : ");
         for (int j = 0; j < 16; j++) {
             info(1, "%02X ", bytes[j]);
         }
