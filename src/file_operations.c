@@ -49,7 +49,7 @@ int check_dirr_component(filesystem_t *fs, const char *dirname, inode_t **opened
     
     info(1, "Checking dirr component: %s, Current File name: %s\n\n", dirname, (*opened_inode)->internal.file_name);
 
-    for(size_t i = 0; i < entries; i++) {
+    for(size_t i = 0; i < entries ; i++) {
         byte *bytes = fs->dblocks + (index * 64) + (i * 16);
 
         dblock_index_t entry_index = (dblock_index_t)((bytes[1] << 8) | bytes[0]);
@@ -68,6 +68,9 @@ int check_dirr_component(filesystem_t *fs, const char *dirname, inode_t **opened
         if(strcmp(entry_name, dirname) == 0) {
             info(1, "Found component: %s\n\n", dirname);
             if(strcmp(entry_name, ".") == 0) {
+                return 1;
+            }
+            else if(strcmp(dirname, "..") == 0 && strcmp((*opened_inode)->internal.file_name, "root") == 0) {
                 return 1;
             }
             else {
@@ -134,6 +137,25 @@ fs_retcode_t get_inode(terminal_context_t *context, char *path, inode_t **opened
     return SUCCESS;
 }
 
+int is_empty(terminal_context_t * context, inode_t *inode) {
+    size_t entries = inode->internal.file_size / 16; 
+    byte *dir_bytes = context->fs->dblocks + (inode->internal.direct_data[0] * 64);
+   
+    info(1, "INSIDE IS EMPTY\n");
+    for (size_t i = 0; i < entries; i++) {
+        byte *bytes = dir_bytes + (i * 16);
+        char entry_name[MAX_FILE_NAME_LEN];
+
+        info(1, "Entry name: %s\n", entry_name);
+        strncpy(entry_name, (char*)(bytes + 2), MAX_FILE_NAME_LEN);
+        if (strncmp(entry_name, ".", MAX_FILE_NAME_LEN) != 0 && strncmp(entry_name, "..", MAX_FILE_NAME_LEN) != 0) { 
+            info(1, "NOT AN EMPTY INODE\n");
+            return 0;
+        }
+    }
+
+    return 1;
+}
 fs_retcode_t enough_dblocks(terminal_context_t *context, inode_t *opened_inode) {
     size_t dblocks_available = available_dblocks(context->fs);
 
@@ -148,6 +170,29 @@ fs_retcode_t enough_dblocks(terminal_context_t *context, inode_t *opened_inode) 
     return SUCCESS;
 }
 
+void update_directory(filesystem_t *fs, inode_t *parent_inode, inode_t *inode, char *file_name, inode_index_t index) {
+    char current[16];
+    current[0] = index & 0xff;
+    current[1] = (index >> 8) & 0xff; 
+    strncpy(current + 2, file_name, MAX_FILE_NAME_LEN);
+
+    dblock_index_t block_index = parent_inode->internal.direct_data[0];
+    byte* parent_bytes = fs->dblocks + (block_index * 64);
+
+    char parent[16];
+    parent[0] = parent_bytes[0] & 0xff;
+    parent[1] = (parent_bytes[1] << 8) & 0xff; 
+    strncpy(parent + 2, "..\n", MAX_FILE_NAME_LEN);
+
+    dblock_index_t new_block;
+    claim_available_dblock(fs, &new_block);
+    byte* bytes = fs->dblocks + (new_block * 64);
+    memcpy(bytes, current, 16);
+    memcpy(bytes + 16, parent, 16);
+
+    inode->internal.direct_data[0] = new_block;
+    inode->internal.file_size = 32;
+}
 void update_parent_directory(filesystem_t *fs, inode_t **parent_inode, char *file_name, inode_index_t index) {
 
     char entry[16];
@@ -206,8 +251,6 @@ void update_parent_directory(filesystem_t *fs, inode_t **parent_inode, char *fil
         bytes = fs->dblocks + (dblock_index * 64) + (directory_entries % 4 * 16);
         memcpy(bytes, entry, 16);
     }
-
-    (*parent_inode)->internal.file_size += 16;
 }
 int new_file(terminal_context_t *context, char *path, permission_t perms)
 {
@@ -310,37 +353,142 @@ int new_directory(terminal_context_t *context, char *path)
     inode_t *inode = &context->fs->inodes[inode_index];
     inode->internal.file_type = DIRECTORY;
     inode->internal.file_size = 0;
-    // inode->internal.file_perms = NULL;
+    inode->internal.file_perms = 0;
     strcpy(inode->internal.file_name, file_name);
-    return -2;
+
+    update_directory(context->fs, parent_inode, inode, file_name, inode_index);
+    update_parent_directory(context->fs, &parent_inode, file_name, inode_index);
+
+    return 0;
 }
 
 int remove_file(terminal_context_t *context, char *path)
 {
-    (void) context;
-    (void) path;
-    return -2;
+    if (context == NULL || path == NULL) {
+        return 0;
+    }
+
+    inode_t *parent_inode = NULL;
+    info(1, "Path: %s\n\n", path);
+    fs_retcode_t code = get_inode(context, path, &parent_inode);
+
+  
+    if(code == DIR_NOT_FOUND) {
+        REPORT_RETCODE(DIR_NOT_FOUND);
+        info(1, "Debug DIR not FOund!\n");
+        return -1;
+    }
+
+    char *basename = get_basename(path);
+    code = check_basename(context->fs, basename, &parent_inode);
+    if(code != 1) {
+        REPORT_RETCODE(FILE_NOT_FOUND);
+        info(1, "Debug file exists!\n");
+        return -1;
+    }
+
+
+    return 0;
 }
 
 // we can only delete a directory if it is empty!!
 int remove_directory(terminal_context_t *context, char *path)
 {
-    (void) context;
-    (void) path;
-    return -2;
+    if (context == NULL || path == NULL) {
+        return 0;
+    }
+
+    info(1, "Path: %s\n", path);
+
+    inode_t *inode = NULL;
+    info(1, "Path: %s\n\n", path);
+    fs_retcode_t code = get_inode(context, path, &inode);
+
+  
+    if(code == DIR_NOT_FOUND) {
+        REPORT_RETCODE(DIR_NOT_FOUND);
+        info(1, "Debug DIR not FOund!\n");
+        return -1;
+    }
+
+    char *basename = get_basename(path);
+
+    if(strncmp(basename, ".", MAX_FILE_NAME_LEN) == 0 || strncmp(basename, ".", MAX_FILE_NAME_LEN) == 0 ) {
+        REPORT_RETCODE(INVALID_FILENAME);
+        return -1;
+    }
+    code = check_basename(context->fs, basename, &inode);
+    if(code != 1) {
+        REPORT_RETCODE(DIR_NOT_FOUND);
+        info(1, "Debug file exists!\n");
+        return -1;
+    }
+
+    info(1, "Name of inode: %s\n", inode->internal.file_name);
+    if(is_empty(context, inode) == 0) {
+        REPORT_RETCODE(DIR_NOT_EMPTY);
+        return -1;
+    }
+
+    if (context->working_directory == inode) {
+        REPORT_RETCODE(ATTEMPT_DELETE_CWD);
+        return -1;
+    }
+
+    return -1;
 }
 
 int change_directory(terminal_context_t *context, char *path)
 {
-    (void) context;
-    (void) path;
+    if (context == NULL || path == NULL) {
+        return 0;
+    }
+
+    inode_t *inode = NULL;
+    info(1, "Path: %s\n\n", path);
+    fs_retcode_t code = get_inode(context, path, &inode);
+
+    if(code == DIR_NOT_FOUND) {
+        REPORT_RETCODE(DIR_NOT_FOUND);
+        info(1, "Debug DIR not FOund!\n");
+        return -1;
+    }
+
+    char *basename = get_basename(path);
+    code = check_basename(context->fs, basename, &inode);
+
+    if(code != 1) {
+        REPORT_RETCODE(DIR_NOT_FOUND);
+        info(1, "Debug file exists!\n");
+        return -1;
+    }
+
     return -2;
 }
 
 int list(terminal_context_t *context, char *path)
 {
-    (void) context;
-    (void) path;
+    if (context == NULL || path == NULL) {
+        return 0;
+    }
+
+    inode_t *inode = NULL;
+    info(1, "Path: %s\n\n", path);
+    fs_retcode_t code = get_inode(context, path, &inode);
+
+    if(code == DIR_NOT_FOUND) {
+        REPORT_RETCODE(DIR_NOT_FOUND);
+        return -1;
+    }
+
+    char *basename = get_basename(path);
+    code = check_basename(context->fs, basename, &inode);
+
+    if(code != 1) {
+        REPORT_RETCODE(NOT_FOUND);
+        return -1;
+    }
+
     return -2;
 }
 
@@ -353,8 +501,27 @@ char *get_path_string(terminal_context_t *context)
 
 int tree(terminal_context_t *context, char *path)
 {
-    (void) context;
-    (void) path;
+    if (context == NULL || path == NULL) {
+        return 0;
+    }
+
+    inode_t *inode = NULL;
+    info(1, "Path: %s\n\n", path);
+    fs_retcode_t code = get_inode(context, path, &inode);
+
+    if(code == DIR_NOT_FOUND) {
+        REPORT_RETCODE(DIR_NOT_FOUND);
+        return -1;
+    }
+
+    char *basename = get_basename(path);
+    code = check_basename(context->fs, basename, &inode);
+
+    if(code != 1) {
+        REPORT_RETCODE(NOT_FOUND);
+        return -1;
+    }
+
     return -2;
 }
 
