@@ -156,6 +156,7 @@ int is_empty(terminal_context_t * context, inode_t *inode) {
 
     return 1;
 }
+
 fs_retcode_t enough_dblocks(terminal_context_t *context, inode_t *opened_inode) {
     size_t dblocks_available = available_dblocks(context->fs);
 
@@ -193,6 +194,7 @@ void update_directory(filesystem_t *fs, inode_t *parent_inode, inode_t *inode, c
     inode->internal.direct_data[0] = new_block;
     inode->internal.file_size = 32;
 }
+
 void update_parent_directory(filesystem_t *fs, inode_t **parent_inode, char *file_name, inode_index_t index) {
 
     char entry[16];
@@ -252,6 +254,7 @@ void update_parent_directory(filesystem_t *fs, inode_t **parent_inode, char *fil
         memcpy(bytes, entry, 16);
     }
 }
+
 int new_file(terminal_context_t *context, char *path, permission_t perms)
 {
     if (context == NULL || path == NULL) {
@@ -463,6 +466,7 @@ int change_directory(terminal_context_t *context, char *path)
         return -1;
     }
 
+    context->working_directory = inode;
     return -2;
 }
 
@@ -489,14 +493,62 @@ int list(terminal_context_t *context, char *path)
         return -1;
     }
 
+    
+
     return -2;
 }
 
 char *get_path_string(terminal_context_t *context)
 {
-    (void) context;
+    char* string;
 
-    return NULL;
+    if(context == NULL){
+        string = malloc(1);
+        string[0] = '\0';
+        return string;
+    }
+
+    string = malloc(1);
+    size_t current_string_size = 1;
+    string[0] = '\0';
+    inode_t *current_inode = context->working_directory;
+    size_t done = 0;
+
+    while(done != 1) {
+        byte *bytes = context->fs->dblocks + (current_inode->internal.direct_data[0] * 64) + 16; 
+        dblock_index_t parent_index = (dblock_index_t)((bytes[1] << 8) | bytes[0]);
+        inode_t *parent_inode = &context->fs->inodes[parent_index];
+        char* current_name = current_inode->internal.file_name;
+        size_t current_name_len = strlen(current_name);
+
+        if(strcmp(current_name, "root") == 0) {
+            string = malloc(current_name_len + 1);
+            strncpy(string, current_name, current_name_len);
+            string[current_name_len] = '\0';
+            return string;
+        }
+
+        string = realloc(string, current_string_size + current_name_len + 1);
+        memmove(string + 1 + current_name_len, string, current_string_size);
+        string[0] = '/';
+        strncpy(string + 1, current_name, current_name_len);
+        string[current_string_size + current_name_len + 1] = '\0';
+
+        current_inode = parent_inode;
+        current_string_size += 1 + current_name_len;
+
+        if(strcmp(parent_inode->internal.file_name, "root") == 0) {
+            done = 1;
+        }
+
+    }
+
+    char* final_string = malloc(current_string_size + 4);
+    strcpy(final_string, "root");
+    strncpy(final_string + 4, string, current_string_size);
+    free(string);
+
+    return final_string;
 }
 
 int tree(terminal_context_t *context, char *path)
@@ -506,7 +558,6 @@ int tree(terminal_context_t *context, char *path)
     }
 
     inode_t *inode = NULL;
-    info(1, "Path: %s\n\n", path);
     fs_retcode_t code = get_inode(context, path, &inode);
 
     if(code == DIR_NOT_FOUND) {
